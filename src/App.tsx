@@ -1,11 +1,5 @@
 import { Switch, Route } from 'wouter';
-import {
-  LayoutDashboard,
-  Users,
-  Calendar,
-  ClipboardList,
-  Settings,
-} from 'lucide-react';
+import { LayoutDashboard, Users, Settings } from "lucide-react";
 
 const DashboardHome = () => (
   <div className="p-8">
