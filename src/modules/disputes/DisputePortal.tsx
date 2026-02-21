@@ -3,107 +3,145 @@ import { supabase } from '../../lib/supabase';
 
 interface DisputePortalProps {
   job: any;
-  onBack: () => void;
-  onComplete: () => void;
+  onClose: () => void;
+  onDisputeFiled: () => void;
 }
 
-export function DisputePortal({ job, onBack, onComplete }: DisputePortalProps) {
-  const [step, setStep] = useState(1);
+const CATEGORIES = [
+  'Work not completed',
+  'Work done incorrectly',
+  'No-show / access issue',
+  'Property damage',
+  'Safety concern',
+  'Other',
+];
+
+const SEVERITIES = ['low', 'medium', 'high', 'critical'];
+
+export function DisputePortal({ job, onClose, onDisputeFiled }: DisputePortalProps) {
+  const [category, setCategory] = useState('');
+  const [severity, setSeverity] = useState('medium');
+  const [failedObjectives, setFailedObjectives] = useState('');
+  const [accessIssues, setAccessIssues] = useState('');
+  const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    category: '', 
-    failedObjectives: [] as string[], 
-    resolution: '', 
-    severity: 'Moderate', 
-    utilitiesAvailable: true, 
-    accessProvided: true, 
-    description: ''
-  });
 
-  const categories = ["No-Show", "Late Arrival", "Incomplete", "Poor Quality", "Wrong Service", "Damage", "Safety"];
-
-  const handleSubmit = async () => {
+  async function handleSubmit() {
+    if (!category) return alert('Please select a category.');
+    if (!description) return alert('Please describe the issue.');
     setLoading(true);
+
     try {
-      // 1. Log the structured dispute
       const { error: disputeError } = await supabase.from('disputes').insert({
-        job_id: job.id, 
-        category: formData.category, 
-        failed_objectives: formData.failedObjectives,
-        severity: formData.severity, 
-        access_issues: { utilities: formData.utilitiesAvailable, access: formData.accessProvided },
-        description: formData.description
+        job_id: job.id,
+        category,
+        severity,
+        failed_objectives: failedObjectives || null,
+        access_issues: accessIssues || null,
+        description,
       });
+
       if (disputeError) throw disputeError;
 
-      // 2. Flag the job
-      const { error: jobError } = await supabase.from('jobs')
-        .update({ status: 'FLAGGED' })
-        .eq('id', job.id);
-      if (jobError) throw jobError;
+      await supabase.from('jobs').update({ status: 'FLAGGED' }).eq('id', job.id);
 
-      onComplete();
-    } catch (err) {
-      console.error(err);
-      alert("Failed to submit dispute.");
+      onDisputeFiled();
+      onClose();
+    } catch (err: any) {
+      alert('Failed to file dispute: ' + err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  const severityColor = (s: string, active: boolean) => {
+    if (!active) return { color: '#555', border: '1px solid #333', background: 'transparent' };
+    const colors: Record<string, string> = { low: '#4488ff', medium: '#ffaa00', high: '#ff6600', critical: '#ff2222' };
+    return { color: colors[s], border: `1px solid ${colors[s]}`, background: 'transparent' };
   };
 
   return (
-    <div style={{ padding: '40px', background: '#050505', minHeight: '100vh', color: 'white', fontFamily: 'monospace' }}>
-      <button onClick={onBack} style={{ background: 'none', border: '1px solid #333', color: '#888', padding: '10px 20px', cursor: 'pointer', marginBottom: '20px' }}>← EXIT DISPUTE</button>
-      <div style={{ maxWidth: '600px', margin: '0 auto', border: '1px solid #333', padding: '30px', background: '#0a0a0a' }}>
-        <h2 style={{ color: 'red', marginTop: 0 }}>STRUCTURED DISPUTE</h2>
-        <p style={{ color: '#444', fontSize: '0.8em' }}>ID: {job.id}</p>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+      <div style={{ background: '#0a0a0a', border: '1px solid #ff222244', borderRadius: '8px', padding: '30px', width: '100%', maxWidth: '480px', color: 'white', fontFamily: 'sans-serif', maxHeight: '90vh', overflowY: 'auto' }}>
 
-        {step === 1 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
-            <h3 style={{ fontSize: '1em', marginBottom: '20px' }}>1. PRIMARY FAILURE CATEGORY</h3>
-            {categories.map(c => (
-              <button key={c} onClick={() => { setFormData({...formData, category: c}); setStep(2); }}
-                style={{ width: '100%', padding: '15px', textAlign: 'left', background: '#111', border: '1px solid #222', color: 'white', marginBottom: '10px', cursor: 'pointer' }}>{c}</button>
-            ))}
+            <h3 style={{ margin: 0, fontSize: '0.9rem', letterSpacing: '1px', color: '#ff4444' }}>FILE A DISPUTE</h3>
+            <p style={{ margin: '4px 0 0 0', color: '#555', fontSize: '0.8rem' }}>{job.description}</p>
           </div>
-        )}
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>✕</button>
+        </div>
 
-        {step === 2 && (
-          <div>
-            <h3 style={{ fontSize: '1em' }}>2. FAILED OBJECTIVES</h3>
-            <div style={{ background: '#000', padding: '20px', border: '1px solid #333', marginBottom: '20px' }}>
-              {job.objectives?.length > 0 ? job.objectives.map((obj: string) => (
-                <div key={obj} style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                  <input type="checkbox" onChange={(e) => {
-                    const next = e.target.checked ? [...formData.failedObjectives, obj] : formData.failedObjectives.filter(o => o !== obj);
-                    setFormData({...formData, failedObjectives: next});
-                  }} />
-                  <span style={{ fontSize: '0.9em' }}>{obj}</span>
-                </div>
-              )) : <div style={{color: '#666'}}>No specific objectives defined for this job.</div>}
-            </div>
-            <button onClick={() => setStep(3)} style={{ width: '100%', padding: '15px', background: 'white', color: 'black', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>NEXT</button>
-          </div>
-        )}
+        <label style={labelStyle}>CATEGORY *</label>
+        <select value={category} onChange={e => setCategory(e.target.value)} style={inputStyle}>
+          <option value="">— Select category —</option>
+          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
 
-        {step === 3 && (
-          <div>
-            <h3 style={{ fontSize: '1em' }}>3. RESOLUTION & CONTEXT</h3>
-            <select onChange={e => setFormData({...formData, resolution: e.target.value})}
-              style={{ width: '100%', padding: '15px', background: '#111', color: 'white', border: '1px solid #333', marginBottom: '20px' }}>
-              <option value="">Select Action...</option>
-              <option value="revisit">Vendor Must Revisit</option>
-              <option value="refund">Partial Refund/Credit</option>
-              <option value="new_vendor">Re-assign to New Vendor</option>
-            </select>
-            <textarea placeholder="Specifics for the audit trail..." onChange={e => setFormData({...formData, description: e.target.value})}
-              style={{ width: '100%', padding: '15px', background: '#000', color: 'white', border: '1px solid #333', height: '100px', marginBottom: '20px' }} />
-            <button onClick={handleSubmit} disabled={loading} style={{ width: '100%', padding: '15px', background: 'red', color: 'white', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>
-              {loading ? 'COMMITTING...' : 'COMMIT DISPUTE'}
+        <label style={labelStyle}>SEVERITY</label>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          {SEVERITIES.map(s => (
+            <button
+              key={s}
+              onClick={() => setSeverity(s)}
+              style={{ flex: 1, padding: '7px 4px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold', letterSpacing: '0.5px', textTransform: 'uppercase', ...severityColor(s, severity === s) }}
+            >
+              {s}
             </button>
-          </div>
-        )}
+          ))}
+        </div>
+
+        <label style={labelStyle}>FAILED OBJECTIVES</label>
+        <textarea
+          value={failedObjectives}
+          onChange={e => setFailedObjectives(e.target.value)}
+          placeholder="Which objectives were not met?"
+          style={{ ...inputStyle, height: '60px', resize: 'vertical' }}
+        />
+
+        <label style={labelStyle}>ACCESS ISSUES</label>
+        <input
+          type="text"
+          value={accessIssues}
+          onChange={e => setAccessIssues(e.target.value)}
+          placeholder="e.g. Vendor couldn't access unit 4B"
+          style={inputStyle}
+        />
+
+        <label style={labelStyle}>DESCRIPTION *</label>
+        <textarea
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Describe the issue in detail..."
+          style={{ ...inputStyle, height: '80px', resize: 'vertical' }}
+        />
+
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={onClose} style={{ ...btnSecondary, flex: 1 }}>Cancel</button>
+          <button onClick={handleSubmit} disabled={loading} style={{ ...btnDanger, flex: 1 }}>
+            {loading ? 'FILING...' : 'FILE DISPUTE'}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
+
+const inputStyle: React.CSSProperties = {
+  display: 'block', width: '100%', padding: '11px 14px',
+  marginBottom: '16px', background: '#000', border: '1px solid #2a2a2a',
+  color: 'white', borderRadius: '6px', fontSize: '0.9rem', boxSizing: 'border-box'
+};
+const labelStyle: React.CSSProperties = {
+  display: 'block', fontSize: '0.7rem', color: '#555',
+  letterSpacing: '1px', marginBottom: '7px'
+};
+const btnSecondary: React.CSSProperties = {
+  background: 'transparent', color: '#666', border: '1px solid #333',
+  padding: '10px 18px', borderRadius: '5px', cursor: 'pointer', fontSize: '0.85rem'
+};
+const btnDanger: React.CSSProperties = {
+  background: '#1a0000', color: '#ff4444', border: '1px solid #ff4444',
+  padding: '10px 18px', borderRadius: '5px', cursor: 'pointer',
+  fontWeight: 'bold', fontSize: '0.85rem', letterSpacing: '0.5px'
+};

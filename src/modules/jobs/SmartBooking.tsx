@@ -1,111 +1,152 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { authorizeFunds } from '../../lib/stripe';
 
 interface SmartBookingProps {
-  locationId: string; // This MUST be a UUID (e.g., "e0c4..."), not a name!
+  locationId: string;
+  onClose: () => void;
   onJobCreated: () => void;
 }
 
-export function SmartBooking({ locationId, onJobCreated }: SmartBookingProps) {
-  // Default to "Plumbing" to match your DB value exactly
-  const [service, setService] = useState('Plumbing'); 
-  const [urgency, setUrgency] = useState('Normal');
+export function SmartBooking({ locationId, onClose, onJobCreated }: SmartBookingProps) {
   const [description, setDescription] = useState('');
+  const [objectives, setObjectives] = useState('');
+  const [selectedVendor, setSelectedVendor] = useState('');
+  const [amount, setAmount] = useState('');
+  const [vendors, setVendors] = useState<any[]>([]);
+  const [locationLabel, setLocationLabel] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleDispatch = async () => {
-    if (!description) return alert("Please describe the issue.");
-    if (!locationId) return alert("ERROR: No Location ID provided.");
+  useEffect(() => {
+    loadData();
+  }, [locationId]);
 
+  async function loadData() {
+    const { data: loc } = await supabase
+      .from('locations')
+      .select('label')
+      .eq('id', locationId)
+      .single();
+    if (loc) setLocationLabel(loc.label);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: vendData } = await supabase
+      .from('vendors')
+      .select('id, company_name, full_name, service_type')
+      .eq('owner_id', user.id);
+    if (vendData) setVendors(vendData);
+  }
+
+  async function handleDispatch() {
+    if (!description) return alert('Please describe the issue.');
     setLoading(true);
 
     try {
-      // DEBUG: This will show you exactly what is being sent to the DB
-      console.log(`DEBUG: Searching DB for location_id: "${locationId}" and service_category: "${service}"`);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
 
-      // 1. LOOKUP VENDOR
-      // We search 'location_services' for the row linking this Location UUID to this Service
-      const { data: mapping, error: lookupError } = await supabase
-        .from('location_services')
-        .select('vendor_id')
-        .eq('location_id', locationId)       // Must match the UUID in your table
-        .eq('service_category', service)     // Uses your specific column name
-        .single();
-
-      if (lookupError || !mapping) {
-        console.error("Supabase Error:", lookupError);
-        throw new Error(`No vendor found! Checked table 'location_services' for Location ID "${locationId}" and Service "${service}".`);
-      }
-
-      // 2. AUTHORIZE FUNDS
-      const authResult = await authorizeFunds(150, `Service: ${service}`);
-      if (!authResult.success) throw new Error("Stripe Authorization Failed.");
-
-      // 3. CREATE JOB
-      const { error: insertError } = await supabase.from('jobs').insert({
+      const { error } = await supabase.from('jobs').insert({
+        owner_id: user.id,
         location_id: locationId,
-        vendor_id: mapping.vendor_id, 
-        description: `${service} - ${description}`,
+        vendor_id: selectedVendor || null,
+        description,
+        objectives: objectives || null,
+        amount: amount ? parseFloat(amount) : null,
         status: 'REPORTED',
-        // payment_intent_id and amount are fine if they exist in your table
-        payment_intent_id: authResult.paymentIntentId,
-        payment_status: 'AUTHORIZED',
-        amount: 150.00
+        payment_status: 'unpaid',
       });
 
-      if (insertError) throw insertError;
+      if (error) throw error;
 
-      setDescription('');
       onJobCreated();
-      alert(`Success! Job assigned to Vendor ${mapping.vendor_id}`);
-
     } catch (err: any) {
-      alert("Dispatch Failed: " + (err.message || "Unknown error"));
+      alert('Failed to create job: ' + err.message);
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div style={{ background: '#111', padding: '20px', border: '1px solid #333' }}>
-      <h3 style={{ marginTop: 0, color: 'white', fontSize: '0.9em' }}>NEW SERVICE REQUEST</h3>
-      
-      {/* SERVICE SELECTOR */}
-      <div style={{ marginBottom: '15px' }}>
-        <label style={{ fontSize: '0.7em', color: '#888', display: 'block', marginBottom: '5px' }}>SERVICE TYPE</label>
-        <select 
-          value={service} 
-          onChange={e => setService(e.target.value)}
-          style={{ width: '100%', padding: '10px', background: '#000', color: 'white', border: '1px solid #333' }}
-        >
-          {/* Values must match 'service_category' column EXACTLY */}
-          <option value="Plumbing">Plumbing</option>
-          <option value="Electrical">Electrical</option>
-          <option value="HVAC">HVAC</option>
-          <option value="General Maintenance">General Maintenance</option>
-        </select>
-      </div>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+      <div style={{ background: '#0a0a0a', border: '1px solid #333', borderRadius: '8px', padding: '30px', width: '100%', maxWidth: '480px', color: 'white', fontFamily: 'sans-serif' }}>
 
-      {/* DESCRIPTION INPUT */}
-      <div style={{ marginBottom: '15px' }}>
-        <label style={{ fontSize: '0.7em', color: '#888', display: 'block', marginBottom: '5px' }}>DETAILS</label>
-        <textarea 
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '0.9rem', letterSpacing: '1px' }}>NEW SERVICE REQUEST</h3>
+            {locationLabel && <p style={{ margin: '4px 0 0 0', color: '#555', fontSize: '0.8rem' }}>{locationLabel}</p>}
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>✕</button>
+        </div>
+
+        <label style={labelStyle}>DESCRIPTION *</label>
+        <textarea
           value={description}
           onChange={e => setDescription(e.target.value)}
-          placeholder="Describe the issue..."
-          style={{ width: '100%', height: '80px', padding: '10px', background: '#000', color: 'white', border: '1px solid #333' }}
+          placeholder="Describe the work to be done..."
+          style={{ ...inputStyle, height: '80px', resize: 'vertical' }}
         />
-      </div>
 
-      {/* DISPATCH BUTTON */}
-      <button 
-        onClick={handleDispatch} 
-        disabled={loading}
-        style={{ width: '100%', padding: '12px', background: 'lime', color: 'black', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}
-      >
-        {loading ? 'PROCESSING...' : 'DISPATCH VENDOR ($150 HOLD)'}
-      </button>
+        <label style={labelStyle}>OBJECTIVES / CHECKLIST</label>
+        <textarea
+          value={objectives}
+          onChange={e => setObjectives(e.target.value)}
+          placeholder="e.g. Clean all units, Fix HVAC in unit 3..."
+          style={{ ...inputStyle, height: '60px', resize: 'vertical' }}
+        />
+
+        <label style={labelStyle}>ASSIGN VENDOR</label>
+        <select
+          value={selectedVendor}
+          onChange={e => setSelectedVendor(e.target.value)}
+          style={inputStyle}
+        >
+          <option value="">— Unassigned —</option>
+          {vendors.map(v => (
+            <option key={v.id} value={v.id}>
+              {v.company_name || v.full_name}{v.service_type ? ` · ${v.service_type}` : ''}
+            </option>
+          ))}
+        </select>
+
+        <label style={labelStyle}>ESTIMATED AMOUNT ($)</label>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={amount}
+          onChange={e => setAmount(e.target.value)}
+          placeholder="0.00"
+          style={inputStyle}
+        />
+        <p style={{ margin: '-10px 0 16px 0', fontSize: '0.7rem', color: '#444' }}>Payment processing coming soon.</p>
+
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={onClose} style={{ ...btnSecondary, flex: 1 }}>Cancel</button>
+          <button onClick={handleDispatch} disabled={loading} style={{ ...btnPrimary, flex: 1 }}>
+            {loading ? 'CREATING...' : 'CREATE JOB'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
+
+const inputStyle: React.CSSProperties = {
+  display: 'block', width: '100%', padding: '11px 14px',
+  marginBottom: '16px', background: '#000', border: '1px solid #2a2a2a',
+  color: 'white', borderRadius: '6px', fontSize: '0.9rem', boxSizing: 'border-box'
+};
+const labelStyle: React.CSSProperties = {
+  display: 'block', fontSize: '0.7rem', color: '#555',
+  letterSpacing: '1px', marginBottom: '7px'
+};
+const btnPrimary: React.CSSProperties = {
+  background: '#111', color: 'lime', border: '1px solid lime',
+  padding: '10px 18px', borderRadius: '5px', cursor: 'pointer',
+  fontWeight: 'bold', fontSize: '0.85rem', letterSpacing: '0.5px'
+};
+const btnSecondary: React.CSSProperties = {
+  background: 'transparent', color: '#666', border: '1px solid #333',
+  padding: '10px 18px', borderRadius: '5px', cursor: 'pointer', fontSize: '0.85rem'
+};

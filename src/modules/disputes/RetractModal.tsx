@@ -2,65 +2,90 @@ import React, { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 
 interface RetractModalProps {
-  job: any;
-  onCancel: () => void;
-  onComplete: () => void;
+  jobId: string;
+  disputeId: string;
+  onClose: () => void;
+  onRetracted: () => void;
 }
 
-export function RetractModal({ job, onCancel, onComplete }: RetractModalProps) {
+export function RetractModal({ jobId, disputeId, onClose, onRetracted }: RetractModalProps) {
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleRetract = async () => {
-    if (!reason) return alert("Please provide a reason for the retraction.");
+  async function handleRetract() {
+    if (!reason.trim()) return alert('Please provide a reason for retracting.');
     setLoading(true);
 
     try {
-      // 1. Update the dispute ledger (The Truth Vault)
-      const { error: disputeError } = await supabase.from('disputes')
-        .update({ retraction_reason: reason, resolved_at: new Date() })
-        .eq('job_id', job.id);
-      
+      const { error: disputeError } = await supabase
+        .from('disputes')
+        .update({
+          retraction_reason: reason,
+          resolution: 'retracted',
+          resolved_at: new Date().toISOString(),
+        })
+        .eq('id', disputeId);
+
       if (disputeError) throw disputeError;
 
-      // 2. Move job to VERIFIED (Permanent Record)
-      const { error: jobError } = await supabase.from('jobs')
-        .update({ status: 'VERIFIED' })
-        .eq('id', job.id);
+      await supabase.from('jobs').update({ status: 'COMPLETED' }).eq('id', jobId);
 
-      if (jobError) throw jobError;
-
-      onComplete();
-    } catch (error) {
-      console.error('Retraction failed:', error);
-      alert('Error processing retraction.');
+      onRetracted();
+      onClose();
+    } catch (err: any) {
+      alert('Failed to retract: ' + err.message);
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-      <div style={{ background: '#0a0a0a', border: '1px solid lime', padding: '30px', maxWidth: '500px', width: '90%', boxShadow: '0 0 30px rgba(0,255,0,0.1)', color: 'white', fontFamily: 'monospace' }}>
-        <h3 style={{ color: 'lime', marginTop: 0, fontSize: '1.2em' }}>RETRACT DISPUTE & VERIFY</h3>
-        <p style={{ fontSize: '0.85em', color: '#888', lineHeight: '1.4' }}>
-          This will move the job to the **Verified Vault**. You must provide a reason for the record (e.g., "Vendor returned and fixed the leak" or "Negotiated 20% credit").
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+      <div style={{ background: '#0a0a0a', border: '1px solid #333', borderRadius: '8px', padding: '30px', width: '100%', maxWidth: '420px', color: 'white', fontFamily: 'sans-serif' }}>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 style={{ margin: 0, fontSize: '0.9rem', letterSpacing: '1px' }}>RETRACT DISPUTE</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>✕</button>
+        </div>
+
+        <p style={{ color: '#555', fontSize: '0.85rem', marginBottom: '20px', lineHeight: 1.5 }}>
+          Retracting will restore the job to <span style={{ color: 'lime' }}>COMPLETED</span> status. This is logged and cannot be undone.
         </p>
-        
-        <textarea 
-          placeholder="Reason for resolution..." 
+
+        <label style={labelStyle}>REASON FOR RETRACTION *</label>
+        <textarea
           value={reason}
           onChange={e => setReason(e.target.value)}
-          style={{ width: '100%', height: '100px', background: '#000', color: 'white', border: '1px solid #333', padding: '15px', marginBottom: '20px', fontSize: '0.9em' }}
+          placeholder="e.g. Issue was resolved directly with the vendor..."
+          style={{ ...inputStyle, height: '80px', resize: 'vertical' }}
         />
 
         <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={onCancel} disabled={loading} style={{ flex: 1, padding: '12px', background: 'none', border: '1px solid #333', color: '#888', cursor: 'pointer' }}>CANCEL</button>
-          <button onClick={handleRetract} disabled={loading} style={{ flex: 1, padding: '12px', background: 'lime', color: 'black', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>
-            {loading ? 'PROCESSING...' : 'VERIFY & VAULT'}
+          <button onClick={onClose} style={{ ...btnSecondary, flex: 1 }}>Cancel</button>
+          <button onClick={handleRetract} disabled={loading} style={{ ...btnPrimary, flex: 1 }}>
+            {loading ? 'RETRACTING...' : 'CONFIRM RETRACT'}
           </button>
         </div>
       </div>
     </div>
   );
 }
+
+const inputStyle: React.CSSProperties = {
+  display: 'block', width: '100%', padding: '11px 14px',
+  marginBottom: '16px', background: '#000', border: '1px solid #2a2a2a',
+  color: 'white', borderRadius: '6px', fontSize: '0.9rem', boxSizing: 'border-box'
+};
+const labelStyle: React.CSSProperties = {
+  display: 'block', fontSize: '0.7rem', color: '#555',
+  letterSpacing: '1px', marginBottom: '7px'
+};
+const btnPrimary: React.CSSProperties = {
+  background: '#111', color: 'lime', border: '1px solid lime',
+  padding: '10px 18px', borderRadius: '5px', cursor: 'pointer',
+  fontWeight: 'bold', fontSize: '0.85rem', letterSpacing: '0.5px'
+};
+const btnSecondary: React.CSSProperties = {
+  background: 'transparent', color: '#666', border: '1px solid #333',
+  padding: '10px 18px', borderRadius: '5px', cursor: 'pointer', fontSize: '0.85rem'
+};
